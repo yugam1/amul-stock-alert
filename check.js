@@ -1,32 +1,41 @@
-// Checks one Amul shop product for a given pincode and sends an ntfy alert
-// when it flips from sold out to in stock.
+// Checks a list of Amul shop products for one pincode and sends an ntfy alert
+// to each item's own topic when a product flips from sold out to in stock.
+//
+// Products live in items.json. Each item names the repo secret holding its
+// ntfy topic, so topic names never appear in the repo.
 //
 // Env vars:
-//   PINCODE      delivery pincode to check (required)
-//   NTFY_TOPIC   ntfy topic name (required)
-//   PRODUCT_URL  product page (optional, defaults to High Protein Rose Lassi)
-//   NTFY_SERVER  ntfy server (optional, defaults to https://ntfy.sh)
-//   TEST_NOTIFY  "true" sends a test notification regardless of stock
+//   PINCODE       delivery pincode to check (required)
+//   SECRETS_JSON  JSON object of repo secrets, used to look up each topic (required)
+//   NTFY_SERVER   ntfy server (optional, defaults to https://ntfy.sh)
+//   TEST_NOTIFY   "true" sends a test notification to every topic
 
 import { chromium } from 'playwright';
 import fs from 'node:fs';
 
 const PINCODE = (process.env.PINCODE || '').trim();
-const NTFY_TOPIC = (process.env.NTFY_TOPIC || '').trim();
 const NTFY_SERVER = (process.env.NTFY_SERVER || 'https://ntfy.sh').replace(/\/$/, '');
-const PRODUCT_URL =
-  process.env.PRODUCT_URL ||
-  'https://shop.amul.com/en/product/amul-high-protein-rose-lassi-200-ml-or-pack-of-30';
 const TEST_NOTIFY = process.env.TEST_NOTIFY === 'true';
 const STATE_FILE = 'state.json';
+const BASE = 'https://shop.amul.com/en/product/';
 
 if (!/^\d{6}$/.test(PINCODE)) throw new Error('PINCODE must be a 6-digit pincode');
-if (!NTFY_TOPIC) throw new Error('NTFY_TOPIC is not set');
 
-async function notify(title, message, priority = 'high') {
-  const res = await fetch(`${NTFY_SERVER}/${encodeURIComponent(NTFY_TOPIC)}`, {
+const secrets = JSON.parse(process.env.SECRETS_JSON || '{}');
+const items = JSON.parse(fs.readFileSync('items.json', 'utf8'));
+
+// Resolve every topic up front so a missing secret fails loudly.
+for (const item of items) {
+  item.topic = (secrets[item.topicSecret] || '').trim();
+  if (!item.topic) throw new Error(`Secret ${item.topicSecret} is not set (item "${item.label}")`);
+}
+
+async function notify(topic, title, message, clickUrl, priority = 'high') {
+  const headers = { Title: title, Priority: priority, Tags: 'milk_glass' };
+  if (clickUrl) headers.Click = clickUrl;
+  const res = await fetch(`${NTFY_SERVER}/${encodeURIComponent(topic)}`, {
     method: 'POST',
-    headers: { Title: title, Priority: priority, Tags: 'milk_glass', Click: PRODUCT_URL },
+    headers,
     body: message,
   });
   if (!res.ok) throw new Error(`ntfy returned ${res.status}`);
@@ -65,8 +74,8 @@ async function setPincode(page) {
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
 }
 
-async function readStock(page) {
-  await page.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+async function readStock(page, url) {
+  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
   const addBtn = page.locator('a.add-to-cart').first();
   await addBtn.waitFor({ state: 'visible', timeout: 30000 });
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
@@ -93,9 +102,20 @@ async function readStock(page) {
 
 async function main() {
   if (TEST_NOTIFY) {
-    await notify('Amul alert test', 'Test notification, the alert pipeline works.', 'default');
-    console.log('Test notification sent');
+    for (const item of items) {
+      await notify(
+        item.topic,
+        `Amul alert test: ${item.label}`,
+        `Test notification, alerts for ${item.label} will arrive here.`,
+        null,
+        'default'
+      );
+    }
+    console.log(`Test notification sent to ${items.length} topic(s)`);
   }
+
+  const state = readState();
+  const failures = [];
 
   const browser = await chromium.launch();
   const context = await browser.newContext({
@@ -108,27 +128,42 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    await page.goto(PRODUCT_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto(BASE + items[0].products[0], { waitUntil: 'domcontentloaded', timeout: 60000 });
     await setPincode(page);
-    const { name, status } = await readStock(page);
 
-    const previous = readState().status;
-    console.log(`${name}: ${status} (previous: ${previous || 'none'}) for ${PINCODE}`);
-
-    if (status === 'in_stock' && previous !== 'in_stock') {
-      await notify('Amul: back in stock', `${name} is available for ${PINCODE}. Tap to open.`);
-      console.log('Alert sent');
+    for (const item of items) {
+      for (const alias of item.products) {
+        const url = BASE + alias;
+        try {
+          const { name, status } = await readStock(page, url);
+          const previous = state[alias]?.status;
+          console.log(`[${item.label}] ${name}: ${status} (previous: ${previous || 'none'})`);
+          if (status === 'in_stock' && previous !== 'in_stock') {
+            await notify(
+              item.topic,
+              'Amul: back in stock',
+              `${name} is available for ${PINCODE}. Tap to open.`,
+              url
+            );
+            console.log(`[${item.label}] alert sent`);
+          }
+          state[alias] = { status, checkedAt: new Date().toISOString() };
+        } catch (err) {
+          failures.push(`${alias}: ${err.message}`);
+          console.error(`[${item.label}] ${alias} failed: ${err.message}`);
+          await page.screenshot({ path: `debug-${alias}.png`, fullPage: true }).catch(() => {});
+        }
+      }
     }
-    fs.writeFileSync(
-      STATE_FILE,
-      JSON.stringify({ status, checkedAt: new Date().toISOString() }, null, 2)
-    );
   } catch (err) {
-    await page.screenshot({ path: 'debug.png', fullPage: true }).catch(() => {});
+    await page.screenshot({ path: 'debug-setup.png', fullPage: true }).catch(() => {});
     throw err;
   } finally {
     await browser.close();
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
   }
+
+  if (failures.length) throw new Error(`${failures.length} product check(s) failed`);
 }
 
 main().catch((err) => {

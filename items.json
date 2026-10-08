@@ -1,0 +1,25 @@
+[
+  {
+    "label": "Rose Lassi",
+    "topicSecret": "NTFY_TOPIC_ROSE_LASSI",
+    "products": ["amul-high-protein-rose-lassi-200-ml-or-pack-of-30"]
+  },
+  {
+    "label": "Whey Protein",
+    "topicSecret": "NTFY_TOPIC_WHEY",
+    "products": [
+      "amul-whey-protein-gift-pack-32-g-or-pack-of-10-sachets",
+      "amul-whey-protein-32-g-or-pack-of-30-sachets",
+      "amul-whey-protein-32-g-or-pack-of-60-sachets"
+    ]
+  },
+  {
+    "label": "Chocolate Whey Protein",
+    "topicSecret": "NTFY_TOPIC_WHEY_CHOCOLATE",
+    "products": [
+      "amul-chocolate-whey-protein-gift-pack-34-g-or-pack-of-10-sachets",
+      "amul-chocolate-whey-protein-34-g-or-pack-of-30-sachets",
+      "amul-chocolate-whey-protein-34-g-or-pack-of-60-sachets"
+    ]
+  }
+]

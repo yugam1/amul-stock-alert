@@ -1,0 +1,62 @@
+name: Amul stock check
+
+on:
+  schedule:
+    - cron: '17 * * * *' # hourly, at minute 17 (UTC)
+  workflow_dispatch:
+    inputs:
+      test_notify:
+        description: 'Also send a test notification'
+        type: boolean
+        default: false
+
+concurrency:
+  group: stock-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: Restore last known status
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: stock-state-${{ github.run_id }}
+          restore-keys: stock-state-
+
+      - name: Check stock
+        run: node check.js
+        env:
+          PINCODE: ${{ secrets.PINCODE }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          TEST_NOTIFY: ${{ inputs.test_notify }}
+
+      - name: Save status
+        if: success()
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: stock-state-${{ github.run_id }}
+
+      - name: Upload debug screenshot
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshot
+          path: debug.png
+          if-no-files-found: ignore

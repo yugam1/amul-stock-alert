@@ -43,11 +43,11 @@ jobs:
         run: node check.js
         env:
           PINCODE: ${{ secrets.PINCODE }}
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          SECRETS_JSON: ${{ toJSON(secrets) }}
           TEST_NOTIFY: ${{ inputs.test_notify }}
 
       - name: Save status
-        if: success()
+        if: always() && hashFiles('state.json') != ''
         uses: actions/cache/save@v4
         with:
           path: state.json
@@ -58,5 +58,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: debug-screenshot
-          path: debug.png
+          path: debug-*.png
           if-no-files-found: ignore

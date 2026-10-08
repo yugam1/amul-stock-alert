@@ -6,7 +6,7 @@
 //
 // Env vars:
 //   PINCODE       delivery pincode to check (required)
-//   SECRETS_JSON  JSON object of repo secrets, used to look up each topic (required)
+//   <topicSecret> one env var per item, named by its topicSecret in items.json (required)
 //   NTFY_SERVER   ntfy server (optional, defaults to https://ntfy.sh)
 //   TEST_NOTIFY   "true" sends a test notification to every topic
 
@@ -21,12 +21,11 @@ const BASE = 'https://shop.amul.com/en/product/';
 
 if (!/^\d{6}$/.test(PINCODE)) throw new Error('PINCODE must be a 6-digit pincode');
 
-const secrets = JSON.parse(process.env.SECRETS_JSON || '{}');
 const items = JSON.parse(fs.readFileSync('items.json', 'utf8'));
 
 // Resolve every topic up front so a missing secret fails loudly.
 for (const item of items) {
-  item.topic = (secrets[item.topicSecret] || '').trim();
+  item.topic = (process.env[item.topicSecret] || '').trim();
   if (!item.topic) throw new Error(`Secret ${item.topicSecret} is not set (item "${item.label}")`);
 }
 

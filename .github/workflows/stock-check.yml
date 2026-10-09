@@ -43,7 +43,9 @@ jobs:
         run: node check.js
         env:
           PINCODE: ${{ secrets.PINCODE }}
-          SECRETS_JSON: ${{ toJSON(secrets) }}
+          NTFY_TOPIC_ROSE_LASSI: ${{ secrets.NTFY_TOPIC_ROSE_LASSI }}
+          NTFY_TOPIC_WHEY: ${{ secrets.NTFY_TOPIC_WHEY }}
+          NTFY_TOPIC_WHEY_CHOCOLATE: ${{ secrets.NTFY_TOPIC_WHEY_CHOCOLATE }}
           TEST_NOTIFY: ${{ inputs.test_notify }}
 
       - name: Save status
